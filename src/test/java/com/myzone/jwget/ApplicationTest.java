@@ -2,20 +2,24 @@ package com.myzone.jwget;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.StringReader;
+import java.io.*;
 import java.net.URL;
 
 import static com.myzone.jwget.Application.download;
 import static com.myzone.jwget.io.FileMatchers.contentEqualsToIgnoreEOL;
+import static java.lang.ClassLoader.getSystemResourceAsStream;
 import static java.nio.file.Files.delete;
 import static org.apache.commons.io.IOUtils.copy;
 import static org.junit.Assert.*;
 
 public class ApplicationTest {
+
+    @Rule
+    public TemporaryFolder folder = new TemporaryFolder();
 
     private File origin;
 
@@ -26,10 +30,17 @@ public class ApplicationTest {
 
     @Before
     public void setUp() throws Exception {
-        origin = new File("resources/origin.html");
+        origin = folder.newFile("origin.html");
+
+        try (
+                InputStream inputStream = getSystemResourceAsStream("origin.html");
+                OutputStream outputStream = new FileOutputStream(origin)
+        ) {
+            copy(inputStream, outputStream);
+        }
 
         url = new URL("http://programming-motherfucker.com/");
-        destination = new File("programming-motherfucker.html");
+        destination = folder.newFile("programming-motherfucker.html");
         workersCount = 4;
         chunkSize = 512;
     }
@@ -43,6 +54,7 @@ public class ApplicationTest {
 
     @Test
     public void testFileCreation() throws Exception {
+        delete(destination.toPath());
         assertFalse(destination.exists());
 
         download(url, destination, workersCount, chunkSize);
