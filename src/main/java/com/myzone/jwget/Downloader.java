@@ -14,11 +14,13 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayDeque;
 import java.util.Iterator;
+import java.util.NoSuchElementException;
 import java.util.Queue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import static java.util.concurrent.Executors.newFixedThreadPool;
 import static org.apache.commons.io.IOUtils.closeQuietly;
 import static org.apache.commons.io.IOUtils.copyLarge;
 
@@ -32,13 +34,13 @@ public class Downloader {
             final @NotNull Iterator<? extends Chunk> chunkIterator,
             final int workersCount
     ) throws InterruptedException {
-        ExecutorService executorService = Executors.newFixedThreadPool(workersCount);
+        ExecutorService executorService = newFixedThreadPool(workersCount);
         Queue<Closeable> toClose = new ArrayDeque<>();
 
         for (int launchCounter = 0; launchCounter < workersCount; launchCounter++) {
             try {
                 InputConnector inputConnector = inputConnectorFactory.create();
-                LOGGER.info("{} ", inputConnector);
+                LOGGER.info("{} has been successfully created", inputConnector);
 
                 try {
                     OutputConnector outputConnector = outputConnectorFactory.create();
@@ -86,21 +88,25 @@ public class Downloader {
 
         @Override
         public void run() {
-            while (chunkIterator.hasNext()) {
-                Chunk chunk = chunkIterator.next();
+            try {
+                while (chunkIterator.hasNext()) {
+                    Chunk chunk = chunkIterator.next();
 
-                try (
-                        InputStream inputStream = inputConnector.getSubstream(chunk.getOffset(), chunk.getLength());
-                        OutputStream outputStream = outputConnector.getSubstream(chunk.getOffset(), chunk.getLength());
-                ) {
-                    LOGGER.info("Downloading of {} has been started", chunk);
+                    try (
+                            InputStream inputStream = inputConnector.getSubstream(chunk.getOffset(), chunk.getLength());
+                            OutputStream outputStream = outputConnector.getSubstream(chunk.getOffset(), chunk.getLength());
+                    ) {
+                        LOGGER.info("Downloading of {} has been started", chunk);
 
-                    copyLarge(inputStream, outputStream);
+                        copyLarge(inputStream, outputStream);
 
-                    LOGGER.info("Downloading of {} has been done", chunk);
-                } catch (IOException exception) {
-                    LOGGER.error("Failed to download {} in cause of {}", chunk, exception);
+                        LOGGER.info("Downloading of {} has been done", chunk);
+                    } catch (IOException exception) {
+                        LOGGER.error("Failed to download {} in cause of {}", chunk, exception);
+                    }
                 }
+            } catch (NoSuchElementException ignored) {
+                // all is ok, all chunks have been downloaded, so we're shutting down
             }
         }
     }
