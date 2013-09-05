@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <inceptionYear>2013</inceptionYear>
 
-    <groupId>com.productengine.jwget</groupId>
+    <groupId>com.myzone.jwget</groupId>
     <artifactId>jwget-main</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
@@ -89,6 +89,29 @@
                     <testSource>1.7</testSource>
                     <testTarget>1.7</testTarget>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.myzone.jwget.Application</mainClass>
+                        </manifest>
+                    </archive>
+                    <descriptorRefs>
+                        <descriptorRef>jar-with-dependencies</descriptorRef>
+                    </descriptorRefs>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>make-assembly</id>
+                        <phase>package</phase> 
+                        <goals>
+                            <goal>single</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>
