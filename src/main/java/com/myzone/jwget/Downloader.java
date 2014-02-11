@@ -8,106 +8,98 @@ import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.ArrayDeque;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
-import java.util.Queue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicReference;
 
-import static java.util.concurrent.Executors.newFixedThreadPool;
-import static org.apache.commons.io.IOUtils.closeQuietly;
-import static org.apache.commons.io.IOUtils.copyLarge;
+import static com.google.common.io.ByteStreams.copy;
 
 public class Downloader {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(Downloader.class);
+    private static final @NotNull Logger LOGGER = LoggerFactory.getLogger(Downloader.class);
+
+    protected final @NotNull ExecutorService executorService;
+
+    public Downloader(@NotNull ExecutorService executorService) {
+        this.executorService = executorService;
+    }
 
     public void download(
             final @NotNull Factory<? extends InputConnector> inputConnectorFactory,
             final @NotNull Factory<? extends OutputConnector> outputConnectorFactory,
             final @NotNull Iterator<? extends Chunk> chunkIterator,
-            final int workersCount
-    ) throws InterruptedException {
-        ExecutorService executorService = newFixedThreadPool(workersCount);
-        Queue<Closeable> toClose = new ArrayDeque<>();
+            final int streamsCount
+    ) throws Exception {
+        LOGGER.info("Downloading has been started");
 
-        for (int launchCounter = 0; launchCounter < workersCount; launchCounter++) {
-            try {
-                InputConnector inputConnector = inputConnectorFactory.create();
-                LOGGER.info("{} has been successfully created", inputConnector);
+        Semaphore semaphore = new Semaphore(0);
+        AtomicReference<Exception> exceptionReference = new AtomicReference<>(null);
 
+        for (int streamsCounter = 0; streamsCounter < streamsCount; streamsCounter++) {
+            executorService.submit((Runnable) () -> {
                 try {
-                    OutputConnector outputConnector = outputConnectorFactory.create();
-                    LOGGER.info("{} has been successfully created", outputConnector);
+                    try (InputConnector inputConnector = inputConnectorFactory.create()) {
+                        LOGGER.info("{} has been successfully created", inputConnector);
 
-                    toClose.add(inputConnector);
-                    toClose.add(outputConnector);
+                        try (OutputConnector outputConnector = outputConnectorFactory.create()) {
+                            LOGGER.info("{} has been successfully created", outputConnector);
 
-                    executorService.submit(new ChunkDownloadTask(inputConnector, outputConnector, chunkIterator));
-                } catch (Factory.CreationException e) {
-                    LOGGER.error("Creation of outputConnector has been failed", e);
+                            downloadInternal(inputConnector, outputConnector, chunkIterator);
 
-                    closeQuietly(inputConnector);
-                }
-            } catch (Factory.CreationException e) {
-                LOGGER.error("Creation of inputConnector has been failed", e);
-            }
-        }
+                            semaphore.release();
+                        } catch (Factory.CreationException e) {
+                            LOGGER.error("Creation of outputConnector has been failed", e);
 
-        executorService.shutdown();
-        try {
-            executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
-        } finally {
-            while (!toClose.isEmpty()) {
-                Closeable closeable = toClose.poll();
+                            throw e.getCause();
+                        }
+                    } catch (Factory.CreationException e) {
+                        LOGGER.error("Creation of inputConnector has been failed", e);
 
-                closeQuietly(closeable);
-
-                LOGGER.info("{} has been closed", closeable);
-            }
-        }
-    }
-
-    protected static class ChunkDownloadTask implements Runnable {
-
-        private final InputConnector inputConnector;
-        private final OutputConnector outputConnector;
-        private final Iterator<? extends Chunk> chunkIterator;
-
-        public ChunkDownloadTask(InputConnector inputConnector, OutputConnector outputConnector, Iterator<? extends Chunk> chunkIterator) {
-            this.inputConnector = inputConnector;
-            this.outputConnector = outputConnector;
-            this.chunkIterator = chunkIterator;
-        }
-
-        @Override
-        public void run() {
-            try {
-                while (chunkIterator.hasNext()) {
-                    Chunk chunk = chunkIterator.next();
-
-                    try (
-                            InputStream inputStream = inputConnector.getSubstream(chunk.getOffset(), chunk.getLength());
-                            OutputStream outputStream = outputConnector.getSubstream(chunk.getOffset(), chunk.getLength());
-                    ) {
-                        LOGGER.info("Downloading of {} has been started", chunk);
-
-                        copyLarge(inputStream, outputStream);
-
-                        LOGGER.info("Downloading of {} has been done", chunk);
-                    } catch (IOException exception) {
-                        LOGGER.error("Failed to download {} in cause of {}", chunk, exception);
+                        throw e.getCause();
+                    }
+                } catch (Exception e){
+                    if (exceptionReference.compareAndSet(null, e)) {
+                        semaphore.release(streamsCount);
                     }
                 }
-            } catch (NoSuchElementException ignored) {
-                // all is ok, all chunks have been downloaded, so we're shutting down
-            }
+            });
+        }
+
+        semaphore.acquire(streamsCount);
+        Exception exception = exceptionReference.get();
+        if (exception == null) {
+            LOGGER.info("Downloading has been finished");
+        } else {
+            LOGGER.error("Downloading has been failed in cause of {}", exception);
+
+            throw exception;
         }
     }
+
+    protected void downloadInternal(InputConnector inputConnector, OutputConnector outputConnector, Iterator<? extends Chunk> chunkIterator) {
+        try {
+            while (chunkIterator.hasNext()) {
+                Chunk chunk = chunkIterator.next();
+
+                try (InputStream inputStream = inputConnector.getSubstream(chunk.getOffset(), chunk.getLength());
+                     OutputStream outputStream = outputConnector.getSubstream(chunk.getOffset(), chunk.getLength())) {
+                    LOGGER.info("Downloading of {} has been started", chunk);
+
+                    copy(inputStream, outputStream);
+
+                    LOGGER.info("Downloading of {} has been done", chunk);
+                } catch (IOException exception) {
+                    LOGGER.error("Failed to download {} in cause of {}", chunk, exception);
+                }
+            }
+        } catch (NoSuchElementException ignored) {
+            // all is ok, all chunks have been downloaded, so we're shutting down
+        }
+    }
+
 }

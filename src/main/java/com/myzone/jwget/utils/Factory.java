@@ -17,16 +17,13 @@ public interface Factory<T> {
             super(message);
         }
 
-        public CreationException(String message, Throwable cause) {
-            super(message, cause);
+        public CreationException(Exception cause) {
+            super(cause.getMessage(), cause);
         }
 
-        public CreationException(Throwable cause) {
-            super(cause);
-        }
-
-        public CreationException(String message, Throwable cause, boolean enableSuppression, boolean writableStackTrace) {
-            super(message, cause, enableSuppression, writableStackTrace);
+        @Override
+        public synchronized Exception getCause() {
+            return (Exception) super.getCause();
         }
 
     }

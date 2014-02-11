@@ -47,8 +47,6 @@ public class ChunkGeneratorTest {
 
     @Test(expected = NoSuchElementException.class)
     public void testWrongAccess() throws Throwable {
-        ExecutorService executor = Executors.newSingleThreadExecutor();
-
         for (final Iterator<Chunk> chunkGenerator = new ChunkGenerator(17 * 1024, 1024); chunkGenerator.hasNext(); ) {
             chunkGenerator.next();
             chunkGenerator.next();
@@ -61,11 +59,8 @@ public class ChunkGeneratorTest {
 
         for (final Iterator<Chunk> chunkGenerator = new ChunkGenerator(17 * 1024, 1024); chunkGenerator.hasNext(); ) {
             try {
-                executor.submit(new Runnable() {
-                    @Override
-                    public void run() {
-                        chunkGenerator.next();
-                    }
+                executor.submit(() -> {
+                    chunkGenerator.next();
                 }).get();
             } catch (ExecutionException e) {
                 throw e.getCause();

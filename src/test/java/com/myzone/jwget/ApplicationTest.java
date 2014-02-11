@@ -1,44 +1,50 @@
 package com.myzone.jwget;
 
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.*;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.*;
 import java.net.URL;
 
+import static com.google.common.io.ByteStreams.copy;
+import static com.google.common.io.Files.copy;
 import static com.myzone.jwget.Application.download;
-import static com.myzone.jwget.io.FileMatchers.contentEqualsToIgnoreEOL;
+import static com.myzone.jwget.io.FileMatchers.contentEqualsToIgnoreEol;
 import static java.lang.ClassLoader.getSystemResourceAsStream;
 import static java.nio.file.Files.delete;
-import static org.apache.commons.io.IOUtils.copy;
 import static org.junit.Assert.*;
 
 public class ApplicationTest {
 
-    @Rule
-    public TemporaryFolder folder = new TemporaryFolder();
+    @ClassRule
+    public static TemporaryFolder folder = new TemporaryFolder();
 
-    private File origin;
+    private static File origin;
+    private static File garbage;
 
     private URL url;
     private File destination;
     private int workersCount;
     private int chunkSize;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeClass
+    public static void setUpClass() throws Exception {
         origin = folder.newFile("origin.html");
+        garbage = folder.newFile("garbage.txt");
 
-        try (
-                InputStream inputStream = getSystemResourceAsStream("origin.html");
-                OutputStream outputStream = new FileOutputStream(origin)
-        ) {
+        try (InputStream inputStream = getSystemResourceAsStream("origin.html");
+             OutputStream outputStream = new FileOutputStream(origin)) {
             copy(inputStream, outputStream);
         }
 
+        try (InputStream inputStream = getSystemResourceAsStream("garbage.txt");
+             OutputStream outputStream = new FileOutputStream(garbage)) {
+            copy(inputStream, outputStream);
+        }
+    }
+
+    @Before
+    public void setUp() throws Exception {
         url = new URL("http://programming-motherfucker.com/");
         destination = folder.newFile("programming-motherfucker.html");
         workersCount = 4;
@@ -60,18 +66,18 @@ public class ApplicationTest {
         download(url, destination, workersCount, chunkSize);
 
         assertTrue(destination.exists());
-        assertThat(destination, contentEqualsToIgnoreEOL(origin));
+        assertThat(destination, contentEqualsToIgnoreEol(origin));
     }
 
     @Test
     public void testFileRewrite() throws Exception {
-        destination.createNewFile();
-        copy(new StringReader("bla-bla-bla"), new FileOutputStream(destination));
+        assertTrue(destination.exists() || destination.createNewFile());
+        copy(garbage, destination);
 
         download(url, destination, workersCount, chunkSize);
 
         assertTrue(destination.exists());
-        assertThat(destination, contentEqualsToIgnoreEOL(origin));
+        assertThat(destination, contentEqualsToIgnoreEol(origin));
     }
 
 }

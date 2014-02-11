@@ -2,15 +2,12 @@ package com.myzone.jwget;
 
 import com.myzone.jwget.io.ByteArrayInputConnector;
 import com.myzone.jwget.io.ByteArrayOutputConnector;
-import com.myzone.jwget.io.InputConnector;
-import com.myzone.jwget.io.OutputConnector;
 import com.myzone.jwget.utils.ChunkGenerator;
-import com.myzone.jwget.utils.Factory;
-import org.jetbrains.annotations.NotNull;
 import org.junit.Before;
 import org.junit.Test;
 
-import static org.junit.Assert.assertArrayEquals;
+import static java.util.concurrent.Executors.newCachedThreadPool;
+import static org.junit.Assert.*;
 
 public class DownloaderTest {
 
@@ -18,7 +15,7 @@ public class DownloaderTest {
 
     @Before
     public void setUp() throws Exception {
-        downloader = new Downloader();
+        downloader = new Downloader(newCachedThreadPool());
     }
 
     @Test
@@ -27,20 +24,8 @@ public class DownloaderTest {
         final byte[] actual = new byte[expected.length];
 
         downloader.download(
-                new Factory<InputConnector>() {
-                    @NotNull
-                    @Override
-                    public InputConnector create() {
-                        return new ByteArrayInputConnector(expected);
-                    }
-                },
-                new Factory<OutputConnector>() {
-                    @NotNull
-                    @Override
-                    public OutputConnector create() throws CreationException {
-                        return new ByteArrayOutputConnector(actual);
-                    }
-                },
+                () -> new ByteArrayInputConnector(expected),
+                () -> new ByteArrayOutputConnector(actual),
                 new ChunkGenerator(expected.length, 32),
                 1
         );
@@ -54,21 +39,25 @@ public class DownloaderTest {
         final byte[] actual = new byte[expected.length];
 
         downloader.download(
-                new Factory<InputConnector>() {
-                    @NotNull
-                    @Override
-                    public InputConnector create() {
-                        return new ByteArrayInputConnector(expected);
-                    }
-                },
-                new Factory<OutputConnector>() {
-                    @NotNull
-                    @Override
-                    public OutputConnector create() throws CreationException {
-                        return new ByteArrayOutputConnector(actual);
-                    }
-                },
+                () -> new ByteArrayInputConnector(expected),
+                () -> new ByteArrayOutputConnector(actual),
                 new ChunkGenerator(expected.length, 32),
+                10
+        );
+
+        assertArrayEquals(expected, actual);
+    }
+
+
+    @Test(expected = Exception.class)
+    public void testDownloadFailedData() throws Exception {
+        final byte[] expected = "oololoololoololololoololoololoololoololoololoololoololooololoololoololololo".getBytes();
+        final byte[] actual = new byte[expected.length];
+
+        downloader.download(
+                () -> new ByteArrayInputConnector(expected),
+                () -> new ByteArrayOutputConnector(actual),
+                new ChunkGenerator(expected.length + 5, 32),
                 10
         );
 
