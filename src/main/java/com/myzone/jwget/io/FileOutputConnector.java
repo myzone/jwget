@@ -4,12 +4,14 @@ import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.file.Path;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static com.google.common.base.Objects.toStringHelper;
 
@@ -52,7 +54,7 @@ public class FileOutputConnector implements OutputConnector {
 
     protected static class BufferedSubstream extends OutputStream {
 
-        protected static final ConcurrentHashMap<Path, Semaphore> SEMAPHORES_MAP = new ConcurrentHashMap<>();
+        protected static final ConcurrentHashMap<Path, WeakReference<Semaphore>> SEMAPHORES_MAP = new ConcurrentHashMap<>();
 
         protected final Path path;
         protected final FileChannel fileChannel;
@@ -86,8 +88,24 @@ public class FileOutputConnector implements OutputConnector {
             buffer.flip();
 
             // lock on the OS level
-            try (FileLock lock = fileChannel.lock(offset, buffer.capacity(), false)) {
-                Semaphore semaphore = SEMAPHORES_MAP.computeIfAbsent(path, (path) -> new Semaphore(1, true));
+            try (FileLock fileLock = fileChannel.lock(offset, buffer.capacity(), false)) {
+                Semaphore semaphore = null;
+                WeakReference<Semaphore> semaphoreWeakReference = null;
+
+                // getting current semaphore
+                while(semaphore == null) {
+                    AtomicReference<Semaphore> semaphoreAtomicReference = new AtomicReference<>(null);
+                    semaphoreWeakReference = SEMAPHORES_MAP.computeIfAbsent(path, (path) -> {
+                        Semaphore createdSemaphore = new Semaphore(1, true);
+
+                        semaphoreAtomicReference.set(createdSemaphore);
+
+                        return new WeakReference<>(createdSemaphore);
+                    });
+
+                    if (semaphore == null) semaphore = semaphoreAtomicReference.get();
+                    if (semaphore == null) semaphore = semaphoreWeakReference.get();
+                }
 
                 // lock on JVM level
                 semaphore.acquireUninterruptibly();
@@ -101,13 +119,14 @@ public class FileOutputConnector implements OutputConnector {
                         fileChannel.position(initialPosition);
                     }
                 } finally {
-                    if (semaphore.availablePermits() == 0) {
-                        // this semaphore is unused, so we should get rid of it
+                    semaphore.release();
+                    semaphore = null; // let GC collect semaphore
+
+                    if (semaphoreWeakReference.get() == null) {
+                        // empty weak reference can be removed from map
 
                         SEMAPHORES_MAP.remove(path);
                     }
-
-                    semaphore.release();
                 }
             }
         }
