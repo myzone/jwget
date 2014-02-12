@@ -2,21 +2,29 @@ package com.myzone.jwget.io;
 
 import org.jetbrains.annotations.NotNull;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.file.Path;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
 
 import static com.google.common.base.Objects.toStringHelper;
 
 public class FileOutputConnector implements OutputConnector {
 
-    protected final RandomAccessFile file;
+    protected final Path path;
+    protected final FileChannel fileChannel;
+
     protected volatile boolean closed;
 
-    public FileOutputConnector(@NotNull RandomAccessFile file) {
-        this.file = file;
-        this.closed = false;
+    public FileOutputConnector(@NotNull Path path, @NotNull FileChannel fileChannel) {
+        this.path = path;
+        this.fileChannel = fileChannel;
+
+        closed = false;
     }
 
     @NotNull
@@ -25,7 +33,7 @@ public class FileOutputConnector implements OutputConnector {
         if (closed)
             throw new IOException("Connector is closed");
 
-        return new BufferedSubstream(file, offset, length);
+        return new BufferedSubstream(path, fileChannel, offset, length);
     }
 
     @Override
@@ -36,47 +44,70 @@ public class FileOutputConnector implements OutputConnector {
     @Override
     public String toString() {
         return toStringHelper(this)
-                .add("file", file)
+                .add("path", path)
+                .add("fileChannel", fileChannel)
                 .add("closed", closed)
                 .toString();
     }
 
     protected static class BufferedSubstream extends OutputStream {
 
-        protected final RandomAccessFile file;
+        protected static final ConcurrentHashMap<Path, Semaphore> SEMAPHORES_MAP = new ConcurrentHashMap<>();
 
+        protected final Path path;
+        protected final FileChannel fileChannel;
         protected final long offset;
-        protected final ByteArrayOutputStream outputStream;
 
-        public BufferedSubstream(@NotNull RandomAccessFile file, long offset, long length) {
+        protected final ByteBuffer buffer;
+
+        public BufferedSubstream(@NotNull Path path, @NotNull FileChannel fileChannel, long offset, long length) throws IOException {
             if (length > Integer.MAX_VALUE)
                 throw new RuntimeException("length bigger then Integer.MAX_VALUE isn't supported");
 
-            this.file = file;
+            this.path = path;
+            this.fileChannel = fileChannel;
             this.offset = offset;
-            this.outputStream = new ByteArrayOutputStream((int) length);
+
+            buffer = ByteBuffer.allocate((int) length);
         }
 
         @Override
         public void write(int b) {
-            outputStream.write(b);
+            buffer.put((byte) b);
         }
 
         @Override
-        public void write(byte[] b, int off, int len) {
-            outputStream.write(b, off, len);
+        public void write(@NotNull byte[] b, int off, int len) {
+            buffer.put(b, off, len);
         }
 
         @Override
         public void flush() throws IOException {
-            synchronized (file) {
-                long currentPosition = file.getFilePointer();
+            buffer.flip();
 
+            // lock on the OS level
+            try (FileLock lock = fileChannel.lock(offset, buffer.capacity(), false)) {
+                Semaphore semaphore = SEMAPHORES_MAP.computeIfAbsent(path, (path) -> new Semaphore(1, true));
+
+                // lock on JVM level
+                semaphore.acquireUninterruptibly();
                 try {
-                    file.seek(offset);
-                    file.write(outputStream.toByteArray());
+                    long initialPosition = fileChannel.position();
+                    try {
+                        fileChannel.position(offset);
+                        fileChannel.write(buffer);
+                        fileChannel.force(true);
+                    } finally {
+                        fileChannel.position(initialPosition);
+                    }
                 } finally {
-                    file.seek(currentPosition);
+                    if (semaphore.availablePermits() == 0) {
+                        // this semaphore is unused, so we should get rid of it
+
+                        SEMAPHORES_MAP.remove(path);
+                    }
+
+                    semaphore.release();
                 }
             }
         }

@@ -50,7 +50,9 @@ public class NetworkInputConnector implements InputConnector {
 
     @Override
     public void close() throws IOException {
-        inputStream.close();
+        synchronized (lock) {
+            inputStream.close();
+        }
     }
 
     @Override
@@ -66,14 +68,18 @@ public class NetworkInputConnector implements InputConnector {
         protected final InputStream inputStream;
         protected long bytesLeft;
 
+        protected final Object lock;
+
         public Substream(@NotNull InputStream inputStream, long bytesLeft) {
             this.inputStream = inputStream;
             this.bytesLeft = bytesLeft;
+
+            lock = new Object();
         }
 
         @Override
         public int read() throws IOException {
-            synchronized (inputStream) {
+            synchronized (lock) {
                 if (bytesLeft < 1)
                     return -1;
 
@@ -87,15 +93,15 @@ public class NetworkInputConnector implements InputConnector {
         }
 
         @Override
-        public int read(byte b[], int off, int len) throws IOException {
-            synchronized (inputStream) {
+        public int read(@NotNull byte b[], int off, int len) throws IOException {
+            synchronized (lock) {
                 return super.read(b, off, len);
             }
         }
 
         @Override
         public long skip(long n) throws IOException {
-            synchronized (inputStream) {
+            synchronized (lock) {
                 long bytesSkipped = inputStream.skip(min(n, bytesLeft));
 
                 bytesLeft -= bytesSkipped;
@@ -106,14 +112,14 @@ public class NetworkInputConnector implements InputConnector {
 
         @Override
         public int available() {
-            synchronized (inputStream) {
+            synchronized (lock) {
                 return (int) bytesLeft;
             }
         }
 
         @Override
         public void close() throws IOException {
-            synchronized (inputStream) {
+            synchronized (lock) {
                 skip(bytesLeft);
             }
         }

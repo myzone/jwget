@@ -3,34 +3,42 @@ package com.myzone.jwget;
 import org.junit.*;
 import org.junit.rules.TemporaryFolder;
 
-import java.io.*;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URL;
+import java.nio.file.Path;
 
 import static com.google.common.io.ByteStreams.copy;
 import static com.google.common.io.Files.copy;
 import static com.myzone.jwget.Application.download;
 import static com.myzone.jwget.io.FileMatchers.contentEqualsToIgnoreEol;
 import static java.lang.ClassLoader.getSystemResourceAsStream;
-import static java.nio.file.Files.delete;
-import static org.junit.Assert.*;
+import static java.nio.file.Files.*;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
 
 public class ApplicationTest {
 
     @ClassRule
-    public static TemporaryFolder folder = new TemporaryFolder();
+    public static TemporaryFolder classFolder = new TemporaryFolder();
 
     private static File origin;
     private static File garbage;
 
+    @Rule
+    public TemporaryFolder folder = new TemporaryFolder();
+
     private URL url;
-    private File destination;
+    private Path destination;
     private int workersCount;
     private int chunkSize;
 
     @BeforeClass
     public static void setUpClass() throws Exception {
-        origin = folder.newFile("origin.html");
-        garbage = folder.newFile("garbage.txt");
+        origin = classFolder.newFile("origin.html");
+        garbage = classFolder.newFile("garbage.txt");
 
         try (InputStream inputStream = getSystemResourceAsStream("origin.html");
              OutputStream outputStream = new FileOutputStream(origin)) {
@@ -46,7 +54,7 @@ public class ApplicationTest {
     @Before
     public void setUp() throws Exception {
         url = new URL("http://programming-motherfucker.com/");
-        destination = folder.newFile("programming-motherfucker.html");
+        destination = folder.newFile("programming-motherfucker.html").toPath();
         workersCount = 4;
         chunkSize = 512;
     }
@@ -54,30 +62,28 @@ public class ApplicationTest {
     @After
     public void tearDown() throws Exception {
         System.gc();
-
-        delete(destination.toPath());
     }
 
     @Test
     public void testFileCreation() throws Exception {
-        delete(destination.toPath());
-        assertFalse(destination.exists());
+        deleteIfExists(destination);
 
         download(url, destination, workersCount, chunkSize);
 
-        assertTrue(destination.exists());
-        assertThat(destination, contentEqualsToIgnoreEol(origin));
+        assertTrue(exists(destination));
+        assertThat(destination.toFile(), contentEqualsToIgnoreEol(origin));
     }
 
     @Test
     public void testFileRewrite() throws Exception {
-        assertTrue(destination.exists() || destination.createNewFile());
-        copy(garbage, destination);
+        deleteIfExists(destination);
+        createFile(destination);
+        copy(garbage, destination.toFile());
 
         download(url, destination, workersCount, chunkSize);
 
-        assertTrue(destination.exists());
-        assertThat(destination, contentEqualsToIgnoreEol(origin));
+        assertTrue(exists(destination));
+        assertThat(destination.toFile(), contentEqualsToIgnoreEol(origin));
     }
 
 }

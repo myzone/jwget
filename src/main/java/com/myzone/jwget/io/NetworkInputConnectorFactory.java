@@ -1,5 +1,6 @@
 package com.myzone.jwget.io;
 
+import com.google.common.base.Objects;
 import com.myzone.jwget.utils.Factory;
 import org.jetbrains.annotations.NotNull;
 
@@ -22,6 +23,13 @@ public class NetworkInputConnectorFactory implements Factory<NetworkInputConnect
         } catch (IOException e) {
             throw new CreationException(e);
         }
+    }
+
+    @Override
+    public String toString() {
+        return Objects.toStringHelper(this)
+                .add("url", url)
+                .toString();
     }
 
 }
